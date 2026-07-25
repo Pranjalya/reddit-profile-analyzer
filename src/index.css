@@ -25,6 +25,11 @@
   --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+html {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -41,6 +46,7 @@ body {
   font-family: var(--font-sans);
   min-height: 100vh;
   line-height: 1.5;
+  padding-bottom: env(safe-area-inset-bottom, 0);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -957,10 +963,45 @@ body {
   opacity: 1;
 }
 
+.heatmap-cell.cell-selected {
+  border-color: #ffffff;
+  transform: scale(1.25);
+  z-index: 15;
+  box-shadow: 0 0 10px #ffffff, 0 0 15px var(--accent-purple);
+}
+
+.heatmap-selected-info {
+  margin-top: 1rem;
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid var(--accent-purple);
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  animation: fadeIn 0.25s ease-out;
+}
+
+.heatmap-clear-selected {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.heatmap-clear-selected:hover {
+  color: var(--score-negative);
+}
+
 /* Interactions Tab */
 .interactions-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 1rem;
 }
 
@@ -1019,11 +1060,12 @@ body {
   color: var(--accent-pink);
   border: 1px solid rgba(236, 72, 153, 0.3);
   border-radius: 6px;
-  padding: 0.3rem 0.65rem;
+  padding: 0.4rem 0.75rem;
   font-size: 0.75rem;
   font-weight: 650;
   cursor: pointer;
   margin-top: 0.35rem;
+  min-height: 36px;
   transition: var(--transition-smooth);
 }
 
@@ -1045,7 +1087,7 @@ body {
   backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
-  justify-content: flex-end; /* Slides in as side drawer */
+  justify-content: flex-end; /* Slides in as side drawer on desktop */
   animation: fadeIn 0.3s ease-out;
 }
 
@@ -1059,6 +1101,15 @@ body {
   flex-direction: column;
   box-shadow: -10px 0 35px rgba(0, 0, 0, 0.8);
   animation: slideLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-drag-handle {
+  display: none;
+  width: 40px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  margin: 0.6rem auto 0;
 }
 
 .modal-header {
@@ -1198,6 +1249,241 @@ body {
   box-shadow: var(--glow-cyan);
 }
 
+/* Touch & Mobile Responsive Media Queries */
+@media (hover: none), (max-width: 768px) {
+  .feed-card-prompt {
+    opacity: 0.9;
+    transform: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem;
+  }
+
+  .sidebar {
+    gap: 1rem;
+  }
+
+  .profile-card {
+    padding: 1.25rem 1rem;
+  }
+
+  .profile-avatar-wrapper {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 0.75rem;
+  }
+
+  .profile-name {
+    font-size: 1.3rem;
+  }
+
+  /* Horizontal Touch Tab Bar */
+  .dashboard-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 0.25rem 0.25rem 0.5rem;
+    margin: 0 -0.25rem;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .dashboard-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-tab {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    padding: 0.65rem 1rem;
+    font-size: 0.85rem;
+    border-radius: 20px;
+    min-width: auto;
+    justify-content: center;
+    background: rgba(20, 18, 45, 0.8);
+    border: 1px solid var(--card-border);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-container {
+    padding: 0.85rem 0.65rem;
+  }
+
+  .header {
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .logo {
+    font-size: 1.2rem;
+  }
+
+  .search-screen {
+    margin: 1.5rem auto;
+    padding: 0 0.5rem;
+  }
+
+  .search-input-wrapper {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .search-input {
+    padding: 1rem 1rem 1rem 2.75rem;
+    border-radius: 14px;
+    font-size: 1rem;
+  }
+
+  .search-icon-left {
+    top: 1rem;
+    left: 1rem;
+    font-size: 1.15rem;
+  }
+
+  .search-btn {
+    position: static;
+    width: 100%;
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+    font-size: 1rem;
+  }
+
+  .history-chip {
+    padding: 0.5rem 0.8rem;
+    min-height: 38px;
+    font-size: 0.85rem;
+  }
+
+  /* Subreddits layout adjustments for mobile */
+  .subreddit-bar-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .subreddit-name-col {
+    width: auto;
+    max-width: 180px;
+  }
+
+  .subreddit-count-col {
+    width: auto;
+  }
+
+  .subreddit-bar-container {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-top: 0.25rem;
+  }
+
+  .subreddit-flair-col {
+    grid-column: 1 / -1;
+    width: 100%;
+    text-align: left;
+    margin-top: 0.25rem;
+  }
+
+  /* Feed Controls on mobile */
+  .feed-controls {
+    padding: 1rem;
+  }
+
+  .feed-filters {
+    overflow-x: auto;
+    white-space: nowrap;
+    flex-wrap: nowrap;
+    padding-bottom: 0.35rem;
+    margin: 0 -0.25rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .feed-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .feed-filter-btn {
+    flex: 0 0 auto;
+    padding: 0.5rem 0.85rem;
+    font-size: 0.8rem;
+  }
+
+  .feed-card {
+    padding: 1rem 0.85rem;
+  }
+
+  .feed-card-header {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .feed-card-title {
+    font-size: 1rem;
+  }
+
+  .feed-card-body {
+    font-size: 0.9rem;
+  }
+
+  /* Mobile Bottom Sheet Modal */
+  .modal-overlay {
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    width: 100%;
+    max-width: 100%;
+    height: 88vh;
+    max-height: 88vh;
+    border-left: none;
+    border-top: 1px solid var(--card-border);
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.9);
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .modal-drag-handle {
+    display: block;
+  }
+
+  .modal-header {
+    padding: 1rem 1.25rem;
+  }
+
+  .modal-close-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.4rem;
+  }
+
+  .modal-body {
+    padding: 1rem 1.25rem 2rem;
+  }
+
+  .bubble {
+    margin-left: 14px;
+    padding: 0.85rem 1rem;
+  }
+
+  .thread-hierarchy::before {
+    left: 12px;
+  }
+
+  .bubble::before {
+    left: -14px;
+    width: 12px;
+  }
+}
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
@@ -1212,4 +1498,9 @@ body {
 @keyframes slideLeft {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }

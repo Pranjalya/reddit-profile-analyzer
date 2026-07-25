@@ -17,10 +17,11 @@ function App() {
   const [feedSearchQuery, setFeedSearchQuery] = useState('');
   const [feedSort, setFeedSort] = useState('newest'); // newest, oldest, highest, lowest
 
-  // Context drawer
+  // Context drawer & Heatmap selection
   const [selectedComment, setSelectedComment] = useState(null);
   const [parentComment, setParentComment] = useState(null);
   const [contextLoading, setContextLoading] = useState(false);
+  const [selectedHeatmapCell, setSelectedHeatmapCell] = useState(null);
 
   // Load search history from local storage on mount
   useEffect(() => {
@@ -97,6 +98,7 @@ function App() {
       setFeedInteractionUser('');
       setFeedSearchQuery('');
       setFeedSort('newest');
+      setSelectedHeatmapCell(null);
     } catch (err) {
       console.error(err);
       setError(err.message || 'Failed to scan profile. Reddit API might be down or user does not exist.');
@@ -491,8 +493,13 @@ function App() {
                                   else if (ratio <= 0.75) level = 3;
                                   else level = 4;
                                 }
+                                const isSelected = selectedHeatmapCell?.dayName === daysOfWeek[dayIndex] && selectedHeatmapCell?.hour === hour;
                                 return (
-                                  <div key={hour} className={`heatmap-cell level-${level}`}>
+                                  <div 
+                                    key={hour} 
+                                    className={`heatmap-cell level-${level} ${isSelected ? 'cell-selected' : ''}`}
+                                    onClick={() => setSelectedHeatmapCell({ dayName: daysOfWeek[dayIndex], hour, count })}
+                                  >
                                     <span className="tooltip">
                                       {count} items at {hour}:00 on {daysOfWeek[dayIndex]}
                                     </span>
@@ -512,6 +519,13 @@ function App() {
                           <div className="legend-square level-4"></div>
                           <span>More Active</span>
                         </div>
+
+                        {selectedHeatmapCell && (
+                          <div className="heatmap-selected-info">
+                            <span>📍 <strong>{selectedHeatmapCell.dayName}</strong> at <strong>{selectedHeatmapCell.hour.toString().padStart(2, '0')}:00</strong> — <strong>{selectedHeatmapCell.count}</strong> activity item{selectedHeatmapCell.count === 1 ? '' : 's'}</span>
+                            <button className="heatmap-clear-selected" onClick={() => setSelectedHeatmapCell(null)} title="Clear selection">×</button>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -768,10 +782,11 @@ function App() {
         </div>
       )}
 
-      {/* Conversation Context Side Drawer Modal */}
+      {/* Conversation Context Side Drawer / Bottom Sheet Modal */}
       {selectedComment && (
         <div className="modal-overlay" onClick={() => setSelectedComment(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-drag-handle"></div>
             <div className="modal-header">
               <h3 className="modal-title">Conversation Context</h3>
               <button className="modal-close-btn" onClick={() => setSelectedComment(null)}>
