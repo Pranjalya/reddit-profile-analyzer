@@ -172,6 +172,38 @@ export async function compileStalkerProfile(username, onProgress = null) {
     fetchUserFlairs(author).catch(() => []) // Flairs might fail or time out, fail gracefully
   ]);
 
+  // Batch resolve parent comment authors to enable exact interaction comment matching
+  const parentIds = [...new Set(comments
+    .map(c => c.parent_id)
+    .filter(pid => pid && pid.startsWith('t1_'))
+    .map(pid => pid.replace('t1_', ''))
+  )];
+
+  const parentAuthorMap = {};
+  for (let i = 0; i < parentIds.length; i += 100) {
+    const chunk = parentIds.slice(i, i + 100).join(',');
+    try {
+      const res = await fetch(`${BASE_URL}/comments/ids?ids=${chunk}`);
+      if (res.ok) {
+        const json = await res.json();
+        (json.data || []).forEach(p => {
+          if (p && p.id && p.author) {
+            parentAuthorMap[p.id] = p.author;
+            parentAuthorMap['t1_' + p.id] = p.author;
+          }
+        });
+      }
+    } catch (e) {
+      // Fail gracefully on network issues
+    }
+  }
+
+  comments.forEach(c => {
+    if (c && c.parent_id && parentAuthorMap[c.parent_id]) {
+      c.parent_author = parentAuthorMap[c.parent_id];
+    }
+  });
+
   // Aggregate subreddits directly from comments and posts to guarantee 100% data coverage
   const subMap = new Map();
   [...comments, ...posts].forEach(item => {
@@ -224,15 +256,25 @@ export async function compileStalkerProfile(username, onProgress = null) {
   });
   const flairs = Array.from(flairMap.values());
 
-  // Aggregate interactions directly from comments if rawUsers API failed
+  // Aggregate interactions directly from resolved parent authors & rawUsers
   const userMap = new Map();
   if (Array.isArray(rawUsers)) {
     rawUsers.forEach(u => {
       if (u && u.author && u.author !== '[deleted]') {
-        userMap.set(u.author.toLowerCase(), { author: u.author, count: u.count || 0 });
+        userMap.set(u.author.toLowerCase(), { author: u.author, count: parseInt(u.count, 10) || 0 });
       }
     });
   }
+  comments.forEach(c => {
+    if (c.parent_author && c.parent_author !== '[deleted]' && c.parent_author.toLowerCase() !== author.toLowerCase()) {
+      const key = c.parent_author.toLowerCase();
+      if (!userMap.has(key)) {
+        userMap.set(key, { author: c.parent_author, count: 0 });
+      }
+      userMap.get(key).count += 1;
+    }
+  });
+  const interactions = Array.from(userMap.values()).sort((a, b) => b.count - a.count);
 
   // Extract avatar, exact case of username, and t2 fullname from comments or posts if available
   let profileImg = null;

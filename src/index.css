@@ -798,6 +798,31 @@ body {
   line-height: 1.3;
 }
 
+.feed-card-image-wrapper {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  max-height: 420px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.feed-card-image {
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 10px;
+  transition: transform 0.25s ease;
+}
+
+.feed-card-image:hover {
+  transform: scale(1.015);
+}
+
 .feed-card-footer {
   margin-top: 1rem;
   display: flex;
@@ -984,6 +1009,29 @@ body {
   color: var(--accent-purple);
   font-weight: 600;
   margin-top: 0.25rem;
+}
+
+.snoop-new-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--accent-pink);
+  border: 1px solid rgba(236, 72, 153, 0.3);
+  border-radius: 6px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+  margin-top: 0.35rem;
+  transition: var(--transition-smooth);
+}
+
+.snoop-new-tab-btn:hover {
+  background: rgba(236, 72, 153, 0.25);
+  border-color: var(--accent-pink);
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 
 /* Context Modal / Thread Viewer */

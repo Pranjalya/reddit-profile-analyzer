@@ -13,6 +13,7 @@ function App() {
   // Feed options
   const [feedFilter, setFeedFilter] = useState('all'); // all, posts, comments
   const [feedSubredditFilter, setFeedSubredditFilter] = useState('');
+  const [feedInteractionUser, setFeedInteractionUser] = useState('');
   const [feedSearchQuery, setFeedSearchQuery] = useState('');
   const [feedSort, setFeedSort] = useState('newest'); // newest, oldest, highest, lowest
 
@@ -34,6 +35,14 @@ function App() {
       const defaultHistory = [];
       setStalkHistory(defaultHistory);
       localStorage.setItem('reddit_stalker_history', JSON.stringify(defaultHistory));
+    }
+
+    // Auto-search if ?user= or ?u= is in URL query parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetUser = urlParams.get('user') || urlParams.get('u');
+    if (targetUser) {
+      setSearchQuery(targetUser);
+      handleSearch(targetUser);
     }
   }, []);
 
@@ -85,6 +94,7 @@ function App() {
       // Reset feed states for new user
       setFeedFilter('all');
       setFeedSubredditFilter('');
+      setFeedInteractionUser('');
       setFeedSearchQuery('');
       setFeedSort('newest');
     } catch (err) {
@@ -125,6 +135,29 @@ function App() {
     // Flairs might be a list of { subreddit: "...", author_flair_text: "..." }
     const match = stalkedUser.flairs.find(f => f.subreddit.toLowerCase() === subName.toLowerCase());
     return match ? match.author_flair_text : '';
+  };
+
+  const getPostImageUrl = (post) => {
+    if (!post) return null;
+
+    const rawUrl = post.url_overridden_by_dest || post.url;
+    if (rawUrl && typeof rawUrl === 'string') {
+      const cleanUrl = rawUrl.split('?')[0];
+      if (/\.(jpg|jpeg|png|gif|webp)$/i.test(cleanUrl) || cleanUrl.includes('i.redd.it') || cleanUrl.includes('i.imgur.com')) {
+        return rawUrl.replace(/&amp;/g, '&');
+      }
+    }
+
+    if (post.preview && post.preview.images && post.preview.images[0] && post.preview.images[0].source) {
+      const previewUrl = post.preview.images[0].source.url;
+      if (previewUrl) return previewUrl.replace(/&amp;/g, '&');
+    }
+
+    if (post.thumbnail && post.thumbnail.startsWith('http')) {
+      return post.thumbnail.replace(/&amp;/g, '&');
+    }
+
+    return null;
   };
 
   // Generate sleep heatmap grid (24 hours x 7 days)
@@ -168,6 +201,18 @@ function App() {
     // Filter by Subreddit
     if (feedSubredditFilter) {
       items = items.filter(item => item.subreddit.toLowerCase() === feedSubredditFilter.toLowerCase());
+    }
+
+    // Filter by Interaction User
+    if (feedInteractionUser) {
+      const u = feedInteractionUser.toLowerCase();
+      items = items.filter(item => {
+        const bodyText = (item.body || item.selftext || '').toLowerCase();
+        const titleText = (item.title || '').toLowerCase();
+        const parentAuthor = (item.parent_author || '').toLowerCase();
+        const linkAuthor = (item.link_author || '').toLowerCase();
+        return bodyText.includes(u) || titleText.includes(u) || parentAuthor === u || linkAuthor === u;
+      });
     }
 
     // Filter by Keyword
@@ -527,6 +572,15 @@ function App() {
                       </button>
                     </div>
                   )}
+
+                  {feedInteractionUser && (
+                    <div className="feed-active-filter-alert" style={{ background: 'rgba(168, 85, 247, 0.15)', borderColor: 'var(--accent-purple)' }}>
+                      <span>🤝 Showing interactions with: <strong>u/{feedInteractionUser}</strong></span>
+                      <button className="feed-clear-filter-btn" onClick={() => setFeedInteractionUser('')}>
+                        Show All Content
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="feed-list">
@@ -568,7 +622,26 @@ function App() {
                             </span>
                           </div>
 
-                          {!isComment && <h4 className="feed-card-title">{item.title}</h4>}
+                          {!isComment && (
+                            <>
+                              <h4 className="feed-card-title">{item.title}</h4>
+                              {(() => {
+                                const imageUrl = getPostImageUrl(item);
+                                if (!imageUrl) return null;
+                                return (
+                                  <div className="feed-card-image-wrapper">
+                                    <img 
+                                      src={imageUrl} 
+                                      alt={item.title || 'Post image'} 
+                                      className="feed-card-image"
+                                      loading="lazy"
+                                      onError={(e) => { e.target.parentElement.style.display = 'none'; }}
+                                    />
+                                  </div>
+                                );
+                              })()}
+                            </>
+                          )}
                           
                           <div className={`feed-card-body ${isTruncated ? 'truncated' : ''}`}>
                             {displayText}
@@ -644,7 +717,7 @@ function App() {
             {activeTab === 'interactions' && (
               <div className="glass-panel" style={{ padding: '1.5rem' }}>
                 <h3 className="tab-title">Stalking Connections</h3>
-                <p className="tab-subtitle">Lists Reddit users they have engaged with most. Click a card to shift stalker focus to that user!</p>
+                <p className="tab-subtitle">Lists Reddit users they have engaged with most. Click a card to view interaction comments, or click "Snoop in new tab" to analyze that target!</p>
                 
                 <div className="interactions-list" style={{ marginTop: '1.5rem' }}>
                   {stalkedUser.interactions.map((user) => {
@@ -653,11 +726,28 @@ function App() {
                       <div 
                         key={user.author} 
                         className="glass-panel interaction-card"
-                        onClick={() => handleSearch(user.author)}
+                        onClick={() => {
+                          setFeedInteractionUser(user.author);
+                          setActiveTab('feed');
+                        }}
                       >
                         <div>
                           <span className="interaction-username">u/{user.author}</span>
-                          <p className="rabbit-hole-prompt">Snoop this user →</p>
+                          <p className="rabbit-hole-prompt" style={{ marginBottom: '0.4rem' }}>
+                            View interaction comments →
+                          </p>
+                          <button 
+                            className="snoop-new-tab-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const url = new URL(window.location.href);
+                              url.searchParams.set('user', user.author);
+                              window.open(url.toString(), '_blank');
+                            }}
+                            title={`Open u/${user.author} profile in a new tab`}
+                          >
+                            Snoop this user in new tab ↗
+                          </button>
                         </div>
                         <div className="interaction-details">
                           <span className="interaction-count">{user.count}</span>
