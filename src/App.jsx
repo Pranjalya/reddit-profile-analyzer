@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { compileStalkerProfile, fetchCommentById } from './api';
+import { compileStalkerProfile, fetchCommentById, normalizeUsername } from './api';
 
 function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -28,23 +28,23 @@ function App() {
       try {
         setStalkHistory(JSON.parse(history));
       } catch (e) {
-        setStalkHistory(['kvothe_1010']);
+        setStalkHistory([]);
       }
     } else {
-      const defaultHistory = ['kvothe_1010'];
+      const defaultHistory = [];
       setStalkHistory(defaultHistory);
       localStorage.setItem('reddit_stalker_history', JSON.stringify(defaultHistory));
     }
   }, []);
 
   const saveToHistory = (username) => {
-    const cleanName = username.trim().toLowerCase();
+    const cleanName = normalizeUsername(username);
     if (!cleanName) return;
     
-    // Add to history (remove duplicate first, put new one at the start)
+    // Add to history (case-insensitive deduplication, put new target at the start)
     const updated = [
-      username,
-      ...stalkHistory.filter(name => name.toLowerCase() !== cleanName)
+      cleanName,
+      ...stalkHistory.filter(name => name.toLowerCase() !== cleanName.toLowerCase())
     ].slice(0, 12); // Limit history to 12 items
 
     setStalkHistory(updated);
@@ -58,18 +58,25 @@ function App() {
     localStorage.setItem('reddit_stalker_history', JSON.stringify(updated));
   };
 
-  const handleSearch = async (username) => {
-    if (!username || !username.trim()) return;
+  const handleSearch = async (rawQuery) => {
+    const cleanUsername = normalizeUsername(rawQuery);
+    if (!cleanUsername) return;
     setLoading(true);
     setError(null);
     setLoadingProgress('Initializing stalker sweep...');
     
     try {
       setLoadingProgress('Scanning posts and comments...');
-      const profile = await compileStalkerProfile(username);
+      const profile = await compileStalkerProfile(cleanUsername, ({ commentsCount, postsCount }) => {
+        const parts = [];
+        if (commentsCount > 0) parts.push(`${commentsCount} comment${commentsCount === 1 ? '' : 's'}`);
+        if (postsCount > 0) parts.push(`${postsCount} post${postsCount === 1 ? '' : 's'}`);
+        const progressStr = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+        setLoadingProgress(`Scanning posts and comments...${progressStr}`);
+      });
       
       if (profile.comments.length === 0 && profile.posts.length === 0) {
-        throw new Error(`No posts or comments found for user "${username}" in Reddit index.`);
+        throw new Error(`No posts or comments found for "${cleanUsername}" in Reddit index.`);
       }
 
       setStalkedUser(profile);
@@ -109,10 +116,8 @@ function App() {
 
   // Process data for charts
   const getSubredditActivity = () => {
-    if (!stalkedUser) return [];
-    // We already have user subreddit interactions in stalkedUser.subreddits
-    // It's a list of { subreddit: "delhi", count: 106 }
-    return stalkedUser.subreddits.slice(0, 15); // Top 15 subreddits
+    if (!stalkedUser || !stalkedUser.subreddits) return [];
+    return stalkedUser.subreddits;
   };
 
   const getSubredditFlair = (subName) => {
@@ -238,7 +243,7 @@ function App() {
         <div className="search-screen">
           <h1 className="search-title">Uncover Reddit Footprints</h1>
           <p className="search-subtitle">
-            Enter a Reddit username to inspect their postings, find active subreddits, check flairs, sleep schedules, and read their conversations.
+            Enter a Reddit username or profile URL to inspect their postings, active subreddits, flairs, sleep schedules, and read their conversations.
           </p>
 
           <form 
@@ -252,7 +257,7 @@ function App() {
               <span className="search-icon-left">🔍</span>
               <input
                 type="text"
-                placeholder="Reddit Username (e.g. kvothe_1010)"
+                placeholder="Username or Profile URL (e.g. u/spez or reddit.com/user/spez)"
                 className="search-input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -586,51 +591,54 @@ function App() {
             )}
 
             {/* 3. SUBREDDITS & FLAIRS */}
-            {activeTab === 'subreddits' && (
-              <div className="glass-panel subs-container">
-                <div className="subs-header">
-                  <div>
-                    <h3 className="tab-title">Active Communities</h3>
-                    <p className="tab-subtitle">Which subreddits they post/comment in most. Select a row to filter comments.</p>
+            {activeTab === 'subreddits' && (() => {
+              const subActivity = getSubredditActivity();
+              const maxVal = subActivity[0]?.count || 1;
+              return (
+                <div className="glass-panel subs-container">
+                  <div className="subs-header">
+                    <div>
+                      <h3 className="tab-title">Active Communities ({stalkedUser.subreddits.length})</h3>
+                      <p className="tab-subtitle">Which subreddits they post/comment in most. Select a row to filter comments.</p>
+                    </div>
+                  </div>
+
+                  <div className="subreddit-list">
+                    {subActivity.map((sub) => {
+                      const percent = (sub.count / maxVal) * 100;
+                      const flair = getSubredditFlair(sub.subreddit);
+                      
+                      return (
+                        <div 
+                          key={sub.subreddit} 
+                          className="subreddit-bar-row"
+                          onClick={() => {
+                            setFeedSubredditFilter(sub.subreddit);
+                            setActiveTab('feed');
+                          }}
+                        >
+                          <span className="subreddit-name-col">r/{sub.subreddit}</span>
+                          <div className="subreddit-bar-container">
+                            <div className="subreddit-bar" style={{ width: `${percent}%` }}></div>
+                          </div>
+                          <span className="subreddit-count-col">{sub.count} item{sub.count === 1 ? '' : 's'}</span>
+                          <span 
+                            className="subreddit-flair-col" 
+                            style={{ opacity: flair ? 1 : 0.4 }}
+                            title={flair ? `User flair: ${flair}` : 'No flair found'}
+                          >
+                            🏷️ {flair || 'No flair'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {stalkedUser.subreddits.length === 0 && (
+                      <p style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>No active subreddit logs found.</p>
+                    )}
                   </div>
                 </div>
-
-                <div className="subreddit-list">
-                  {getSubredditActivity().map((sub, index) => {
-                    const maxVal = getSubredditActivity()[0]?.count || 1;
-                    const percent = (sub.count / maxVal) * 100;
-                    const flair = getSubredditFlair(sub.subreddit);
-                    
-                    return (
-                      <div 
-                        key={sub.subreddit} 
-                        className="subreddit-bar-row"
-                        onClick={() => {
-                          setFeedSubredditFilter(sub.subreddit);
-                          setActiveTab('feed');
-                        }}
-                      >
-                        <span className="subreddit-name-col">r/{sub.subreddit}</span>
-                        <div className="subreddit-bar-container">
-                          <div className="subreddit-bar" style={{ width: `${percent}%` }}></div>
-                        </div>
-                        <span className="subreddit-count-col">{sub.count} items</span>
-                        <span 
-                          className="subreddit-flair-col" 
-                          style={{ opacity: flair ? 1 : 0.2 }}
-                          title={flair ? `User flair: ${flair}` : 'No flair found'}
-                        >
-                          🏷️ {flair || 'No flair'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {stalkedUser.subreddits.length === 0 && (
-                    <p style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>No active subreddit logs found.</p>
-                  )}
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* 4. SOCIAL NETWORK / INTERACTIONS */}
             {activeTab === 'interactions' && (
