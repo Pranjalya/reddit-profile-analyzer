@@ -669,8 +669,8 @@ function App() {
           Reddit Stalker <span>Dashboard</span>
         </div>
         {stalkedUser && (
-          <button className="search-btn" style={{ position: 'static' }} onClick={() => setStalkedUser(null)}>
-            Stalk Someone Else
+          <button className="header-reset-btn" onClick={() => setStalkedUser(null)}>
+            ← Search Another
           </button>
         )}
       </header>
@@ -1053,7 +1053,7 @@ function App() {
 
                   <div style={{ marginTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1.5rem' }}>
                     <h4 style={{ fontSize: '1.05rem', fontWeight: '700', marginBottom: '1rem' }}>Timeline Range</h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                    <div className="timeline-range-grid">
                       <div>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Earliest Indexed Activity</span>
                         <p style={{ fontWeight: '600', marginTop: '0.25rem' }}>{formatUnixTime(stalkedUser.stats.earliestActive)}</p>
@@ -1068,8 +1068,13 @@ function App() {
 
                 {/* Sleep Heatmap Grid in Overview page for convenience */}
                 <div className="glass-panel heatmap-container">
-                  <h3 className="tab-title">Activity Hour Tracker (Target Timezone Profiler)</h3>
-                  <p className="tab-subtitle">Plots when the target posts/comments. Darker blocks imply high active periods. Useful to deduce sleep cycles.</p>
+                  <div className="heatmap-header-wrap">
+                    <div>
+                      <h3 className="tab-title">Activity Hour Tracker (Target Timezone Profiler)</h3>
+                      <p className="tab-subtitle">Plots when the target posts/comments. Darker blocks imply high active periods. Useful to deduce sleep cycles.</p>
+                    </div>
+                    <span className="heatmap-mobile-hint">↔ Swipe horizontally for 24h</span>
+                  </div>
                   
                   {(() => {
                     const { grid, maxCount } = getHeatmapData();
@@ -1454,7 +1459,7 @@ function App() {
                             <span className="feed-card-score-pill">
                               {item.score ?? 0} ↑
                             </span>
-                            <span className={`feed-card-type-tag ${isComment ? 'tag-comment' : 'tag-post'}`} style={{ marginLeft: 'auto' }}>
+                            <span className={`feed-card-type-tag ${isComment ? 'tag-comment' : 'tag-post'}`}>
                               {item.type}
                             </span>
                           </div>
