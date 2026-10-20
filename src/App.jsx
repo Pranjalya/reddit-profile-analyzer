@@ -16,7 +16,6 @@ function CommentReplyTree({ reply, depth = 0, formatDateTimeIso }) {
   const redditUrl = reply.permalink 
     ? (reply.permalink.startsWith('http') ? reply.permalink : `https://reddit.com${reply.permalink}`)
     : (reply.link_id ? `https://reddit.com/comments/${reply.link_id.replace('t3_', '')}/_/${reply.id}/` : `https://reddit.com/_/${reply.id}/`);
-  const archiveUrl = `https://arctic-shift.photon-reddit.com/search?id=${reply.id}`;
 
   return (
     <div className={`nested-reply-item depth-${Math.min(depth, 5)}`}>
@@ -45,15 +44,6 @@ function CommentReplyTree({ reply, depth = 0, formatDateTimeIso }) {
           onClick={(e) => e.stopPropagation()}
         >
           🔗 Reddit
-        </a>
-        <a 
-          href={archiveUrl} 
-          target="_blank" 
-          rel="noreferrer" 
-          className="inline-link archive-link"
-          onClick={(e) => e.stopPropagation()}
-        >
-          🔗 Archive
         </a>
         {hasSubReplies && (
           <button 
@@ -1277,8 +1267,6 @@ function App() {
                       const redditUrl = item.permalink
                         ? (item.permalink.startsWith('http') ? item.permalink : `https://reddit.com${item.permalink}`)
                         : (isComment && postId ? `https://reddit.com/comments/${postId}/_/${item.id}/` : `https://reddit.com/comments/${item.id}`);
-
-                      const archiveUrl = `https://arctic-shift.photon-reddit.com/search?id=${item.id}`;
                       
                       return (
                         <div 
@@ -1365,14 +1353,6 @@ function App() {
                                     >
                                       🔗 Reddit
                                     </a>
-                                    <a 
-                                      href={`https://arctic-shift.photon-reddit.com/search?id=${loadedPosts[postId].data.id}`}
-                                      target="_blank" 
-                                      rel="noreferrer"
-                                      className="inline-link archive-link"
-                                    >
-                                      🔗 Archive
-                                    </a>
                                   </div>
                                 </div>
                               )}
@@ -1424,14 +1404,6 @@ function App() {
                                       className="inline-link reddit-link"
                                     >
                                       🔗 Reddit
-                                    </a>
-                                    <a 
-                                      href={`https://arctic-shift.photon-reddit.com/search?id=${loadedParents[parentCommentId].data.id}`}
-                                      target="_blank" 
-                                      rel="noreferrer"
-                                      className="inline-link archive-link"
-                                    >
-                                      🔗 Archive
                                     </a>
                                   </div>
                                 </div>
@@ -1503,7 +1475,7 @@ function App() {
                             </button>
                           )}
 
-                          {/* External Links row (Reddit, Archive, plus context drawer trigger) */}
+                          {/* External Links row (Reddit, plus context drawer trigger) */}
                           <div className="feed-card-links-row">
                             <a 
                               href={redditUrl} 
@@ -1513,15 +1485,6 @@ function App() {
                               onClick={(e) => e.stopPropagation()}
                             >
                               🔗 Reddit
-                            </a>
-                            <a 
-                              href={archiveUrl} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              className="inline-link archive-link"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              🔗 Archive
                             </a>
                             {isComment && (
                               <button 

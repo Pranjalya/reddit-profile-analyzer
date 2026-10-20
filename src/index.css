@@ -1509,14 +1509,14 @@ body {
 }
 
 .feed-card-sub-name {
-  color: #ff5252;
+  color: #ffffff;
   font-weight: 700;
   cursor: pointer;
   transition: color 0.15s ease;
 }
 
 .feed-card-sub-name:hover {
-  color: #ff7675;
+  color: rgba(255, 255, 255, 0.85);
   text-decoration: underline;
 }
 
@@ -1551,7 +1551,7 @@ body {
   color: var(--accent-cyan);
 }
 
-/* Feed Card Links Row (Reddit, Archive, Context) */
+/* Feed Card Links Row */
 .feed-card-links-row {
   display: flex;
   align-items: center;
@@ -1565,8 +1565,8 @@ body {
   align-items: center;
   gap: 0.3rem;
   font-size: 0.825rem;
-  font-weight: 600;
-  padding: 0.25rem 0.5rem;
+  font-weight: 500;
+  padding: 0.2rem 0.4rem;
   border-radius: 4px;
   text-decoration: none;
   cursor: pointer;
@@ -1574,25 +1574,19 @@ body {
   background: transparent;
   border: none;
   font-family: var(--font-sans);
+  width: auto;
+  flex: 0 0 auto;
 }
 
 .inline-link.reddit-link {
   color: #60a5fa;
+  background: transparent;
+  padding: 0.15rem 0.35rem;
 }
 
 .inline-link.reddit-link:hover {
   color: #93c5fd;
-  background: rgba(96, 165, 250, 0.12);
-  text-decoration: underline;
-}
-
-.inline-link.archive-link {
-  color: #a78bfa;
-}
-
-.inline-link.archive-link:hover {
-  color: #c4b5fd;
-  background: rgba(167, 139, 250, 0.12);
+  background: rgba(96, 165, 250, 0.1);
   text-decoration: underline;
 }
 
@@ -2774,20 +2768,27 @@ body {
 
   .feed-card-links-row {
     display: flex;
-    gap: 0.4rem;
-    width: 100%;
+    gap: 0.65rem;
+    align-items: center;
+    width: auto;
     flex-wrap: wrap;
+    margin-top: 0.65rem;
   }
 
   .feed-card-links-row .inline-link {
-    flex: 1 1 auto;
-    justify-content: center;
-    min-height: 34px;
+    flex: 0 0 auto;
+    width: auto;
+    min-height: auto;
+    background: transparent;
+    border: none;
+    padding: 0.15rem 0.35rem;
     font-size: 0.775rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 0.3rem 0.5rem;
+  }
+
+  .feed-card-links-row .inline-link.context-link-btn {
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
   }
 
   .feed-card-expand-btn {
