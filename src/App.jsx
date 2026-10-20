@@ -1,5 +1,84 @@
 import { useState, useEffect } from 'react';
-import { compileStalkerProfile, fetchCommentById, normalizeUsername } from './api';
+import { 
+  compileStalkerProfile, 
+  fetchCommentById, 
+  fetchPostById, 
+  fetchCommentReplies, 
+  fetchPostComments, 
+  normalizeUsername, 
+  fetchAdditionalData 
+} from './api';
+
+function CommentReplyTree({ reply, depth = 0, formatDateTimeIso }) {
+  const [subRepliesVisible, setSubRepliesVisible] = useState(false);
+  const hasSubReplies = reply.replies && reply.replies.length > 0;
+
+  const redditUrl = reply.permalink 
+    ? (reply.permalink.startsWith('http') ? reply.permalink : `https://reddit.com${reply.permalink}`)
+    : (reply.link_id ? `https://reddit.com/comments/${reply.link_id.replace('t3_', '')}/_/${reply.id}/` : `https://reddit.com/_/${reply.id}/`);
+  const archiveUrl = `https://arctic-shift.photon-reddit.com/search?id=${reply.id}`;
+
+  return (
+    <div className={`nested-reply-item depth-${Math.min(depth, 5)}`}>
+      <div className="nested-reply-header">
+        <span className="nested-reply-author">u/{reply.author || '[deleted]'}</span>
+        {reply.author_flair_text && (
+          <span className="nested-reply-flair">🏷️ {reply.author_flair_text}</span>
+        )}
+        <span>•</span>
+        <span className="nested-reply-time" title={formatDateTimeIso(reply.created_utc)}>
+          {reply.created_utc ? new Date(reply.created_utc * 1000).toISOString().replace('.000', '') : ''}
+        </span>
+        <span className="nested-reply-score">{reply.score ?? 0} ↑</span>
+      </div>
+
+      <div className="nested-reply-body">
+        {reply.body || '[deleted]'}
+      </div>
+
+      <div className="nested-reply-footer">
+        <a 
+          href={redditUrl} 
+          target="_blank" 
+          rel="noreferrer" 
+          className="inline-link reddit-link"
+          onClick={(e) => e.stopPropagation()}
+        >
+          🔗 Reddit
+        </a>
+        <a 
+          href={archiveUrl} 
+          target="_blank" 
+          rel="noreferrer" 
+          className="inline-link archive-link"
+          onClick={(e) => e.stopPropagation()}
+        >
+          🔗 Archive
+        </a>
+        {hasSubReplies && (
+          <button 
+            type="button" 
+            className="nested-sub-toggle-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSubRepliesVisible(!subRepliesVisible);
+            }}
+          >
+            {subRepliesVisible ? `↑ Hide replies (${reply.replies.length})` : `↓ ${reply.replies.length} repl${reply.replies.length === 1 ? 'y' : 'ies'}`}
+          </button>
+        )}
+      </div>
+
+      {hasSubReplies && subRepliesVisible && (
+        <div className="nested-sub-replies-list">
+          {reply.replies.map(sub => (
+            <CommentReplyTree key={sub.id} reply={sub} depth={depth + 1} formatDateTimeIso={formatDateTimeIso} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -9,6 +88,31 @@ function App() {
   const [stalkedUser, setStalkedUser] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [stalkHistory, setStalkHistory] = useState([]);
+
+  // Scan toggles (Requirement 1)
+  const [includePosts, setIncludePosts] = useState(true);
+  const [includeComments, setIncludeComments] = useState(true);
+
+  // Real-time subreddit streaming during loading & background fetch (Requirement 4)
+  const [realtimeSubreddits, setRealtimeSubreddits] = useState([]);
+  const [realtimeCounts, setRealtimeCounts] = useState({ comments: 0, posts: 0 });
+
+  // Background fetch status for toggled-off or rate-limited content (Requirements 1 & 3)
+  const [bgFetchStatus, setBgFetchStatus] = useState({
+    loading: false,
+    type: null,
+    count: 0,
+    error: null,
+    successMessage: null,
+  });
+
+  // Expandable cards state (Requirement 2)
+  const [expandedCards, setExpandedCards] = useState({});
+
+  // Dynamic on-click thread loaders (load post, load parent comment, load replies)
+  const [loadedPosts, setLoadedPosts] = useState({});
+  const [loadedParents, setLoadedParents] = useState({});
+  const [loadedReplies, setLoadedReplies] = useState({});
 
   // Feed options
   const [feedFilter, setFeedFilter] = useState('all'); // all, posts, comments
@@ -68,21 +172,57 @@ function App() {
     localStorage.setItem('reddit_stalker_history', JSON.stringify(updated));
   };
 
+  const toggleExpandCard = (id, e) => {
+    if (e) e.stopPropagation();
+    setExpandedCards(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  const toggleExpandAll = () => {
+    const items = getFilteredFeed();
+    const allExpanded = items.length > 0 && items.every(item => !!expandedCards[item.id]);
+    const nextMap = {};
+    items.forEach(item => {
+      nextMap[item.id] = !allExpanded;
+    });
+    setExpandedCards(prev => ({ ...prev, ...nextMap }));
+  };
+
   const handleSearch = async (rawQuery) => {
     const cleanUsername = normalizeUsername(rawQuery);
     if (!cleanUsername) return;
+
+    if (!includePosts && !includeComments) {
+      setError('Please select at least one scan target: Posts or Comments.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setRealtimeSubreddits([]);
+    setRealtimeCounts({ comments: 0, posts: 0 });
+    setExpandedCards({});
+    setBgFetchStatus({ loading: false, type: null, count: 0, error: null, successMessage: null });
     setLoadingProgress('Initializing stalker sweep...');
     
     try {
-      setLoadingProgress('Scanning posts and comments...');
-      const profile = await compileStalkerProfile(cleanUsername, ({ commentsCount, postsCount }) => {
-        const parts = [];
-        if (commentsCount > 0) parts.push(`${commentsCount} comment${commentsCount === 1 ? '' : 's'}`);
-        if (postsCount > 0) parts.push(`${postsCount} post${postsCount === 1 ? '' : 's'}`);
-        const progressStr = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-        setLoadingProgress(`Scanning posts and comments...${progressStr}`);
+      setLoadingProgress('Connecting to Reddit index...');
+      const profile = await compileStalkerProfile(cleanUsername, {
+        fetchPosts: includePosts,
+        fetchComments: includeComments,
+        onProgress: ({ commentsCount, postsCount, discoveredSubreddits }) => {
+          setRealtimeCounts({ comments: commentsCount, posts: postsCount });
+          if (discoveredSubreddits) {
+            setRealtimeSubreddits(discoveredSubreddits);
+          }
+          const parts = [];
+          if (commentsCount > 0) parts.push(`${commentsCount} comment${commentsCount === 1 ? '' : 's'}`);
+          if (postsCount > 0) parts.push(`${postsCount} post${postsCount === 1 ? '' : 's'}`);
+          const progressStr = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+          setLoadingProgress(`Scanning activity...${progressStr}`);
+        }
       });
       
       if (profile.comments.length === 0 && profile.posts.length === 0) {
@@ -92,8 +232,14 @@ function App() {
       setStalkedUser(profile);
       saveToHistory(profile.username);
       setActiveTab('overview');
-      // Reset feed states for new user
-      setFeedFilter('all');
+      // Reset feed filter: default to available type if only one was fetched
+      if (profile.posts.length > 0 && profile.comments.length === 0) {
+        setFeedFilter('posts');
+      } else if (profile.comments.length > 0 && profile.posts.length === 0) {
+        setFeedFilter('comments');
+      } else {
+        setFeedFilter('all');
+      }
       setFeedSubredditFilter('');
       setFeedInteractionUser('');
       setFeedSearchQuery('');
@@ -105,6 +251,65 @@ function App() {
     } finally {
       setLoading(false);
       setLoadingProgress('');
+    }
+  };
+
+  const handleBackgroundFetch = async (type) => {
+    if (!stalkedUser || bgFetchStatus.loading) return;
+
+    setBgFetchStatus({
+      loading: true,
+      type,
+      count: 0,
+      error: null,
+      successMessage: null
+    });
+
+    try {
+      const updatedProfile = await fetchAdditionalData(
+        stalkedUser.username,
+        type,
+        stalkedUser,
+        ({ count, discoveredSubreddits }) => {
+          setBgFetchStatus(prev => ({ ...prev, count }));
+          if (discoveredSubreddits && discoveredSubreddits.length > 0) {
+            setStalkedUser(prev => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                subreddits: discoveredSubreddits,
+                stats: {
+                  ...prev.stats,
+                  subredditsCount: discoveredSubreddits.length,
+                }
+              };
+            });
+          }
+        }
+      );
+
+      setStalkedUser(updatedProfile);
+      setBgFetchStatus({
+        loading: false,
+        type: null,
+        count: 0,
+        error: null,
+        successMessage: `Successfully loaded all ${type} (${updatedProfile[type].length} total)!`
+      });
+
+      // Auto-clear success message after 4s
+      setTimeout(() => {
+        setBgFetchStatus(prev => ({ ...prev, successMessage: null }));
+      }, 4000);
+    } catch (err) {
+      console.error(`Background fetch failed for ${type}:`, err);
+      setBgFetchStatus({
+        loading: false,
+        type,
+        count: 0,
+        error: err.message || `Failed to fetch ${type} in background. You can retry anytime.`,
+        successMessage: null
+      });
     }
   };
 
@@ -124,6 +329,192 @@ function App() {
         setContextLoading(false);
       }
     }
+  };
+
+  const formatDateTimeIso = (timestamp) => {
+    if (!timestamp) return '';
+    try {
+      return new Date(timestamp * 1000).toISOString().replace('.000', '');
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const handleTogglePost = async (linkId, e) => {
+    if (e) e.stopPropagation();
+    if (!linkId) return;
+
+    if (loadedPosts[linkId]?.visible) {
+      setLoadedPosts(prev => ({
+        ...prev,
+        [linkId]: { ...prev[linkId], visible: false }
+      }));
+      return;
+    }
+
+    if (loadedPosts[linkId]?.data) {
+      setLoadedPosts(prev => ({
+        ...prev,
+        [linkId]: { ...prev[linkId], visible: true }
+      }));
+      return;
+    }
+
+    setLoadedPosts(prev => ({
+      ...prev,
+      [linkId]: { loading: true, visible: true, data: null, error: null }
+    }));
+
+    try {
+      const post = await fetchPostById(linkId);
+      setLoadedPosts(prev => ({
+        ...prev,
+        [linkId]: {
+          loading: false,
+          visible: true,
+          data: post,
+          error: !post ? 'Post not found in Reddit archive' : null
+        }
+      }));
+    } catch (err) {
+      setLoadedPosts(prev => ({
+        ...prev,
+        [linkId]: {
+          loading: false,
+          visible: true,
+          data: null,
+          error: err.message || 'Failed to load post'
+        }
+      }));
+    }
+  };
+
+  const handleCloseLoadedPost = (linkId, e) => {
+    if (e) e.stopPropagation();
+    setLoadedPosts(prev => ({
+      ...prev,
+      [linkId]: { ...prev[linkId], visible: false }
+    }));
+  };
+
+  const handleToggleParent = async (parentId, e) => {
+    if (e) e.stopPropagation();
+    if (!parentId) return;
+
+    if (loadedParents[parentId]?.visible) {
+      setLoadedParents(prev => ({
+        ...prev,
+        [parentId]: { ...prev[parentId], visible: false }
+      }));
+      return;
+    }
+
+    if (loadedParents[parentId]?.data) {
+      setLoadedParents(prev => ({
+        ...prev,
+        [parentId]: { ...prev[parentId], visible: true }
+      }));
+      return;
+    }
+
+    setLoadedParents(prev => ({
+      ...prev,
+      [parentId]: { loading: true, visible: true, data: null, error: null }
+    }));
+
+    try {
+      const comment = await fetchCommentById(parentId);
+      setLoadedParents(prev => ({
+        ...prev,
+        [parentId]: {
+          loading: false,
+          visible: true,
+          data: comment,
+          error: !comment ? 'Parent comment not found or deleted' : null
+        }
+      }));
+    } catch (err) {
+      setLoadedParents(prev => ({
+        ...prev,
+        [parentId]: {
+          loading: false,
+          visible: true,
+          data: null,
+          error: err.message || 'Failed to load parent comment'
+        }
+      }));
+    }
+  };
+
+  const handleCloseLoadedParent = (parentId, e) => {
+    if (e) e.stopPropagation();
+    setLoadedParents(prev => ({
+      ...prev,
+      [parentId]: { ...prev[parentId], visible: false }
+    }));
+  };
+
+  const handleToggleReplies = async (item, e) => {
+    if (e) e.stopPropagation();
+    const itemId = item.id;
+    if (!itemId) return;
+
+    if (loadedReplies[itemId]?.visible) {
+      setLoadedReplies(prev => ({
+        ...prev,
+        [itemId]: { ...prev[itemId], visible: false }
+      }));
+      return;
+    }
+
+    if (loadedReplies[itemId]?.data) {
+      setLoadedReplies(prev => ({
+        ...prev,
+        [itemId]: { ...prev[itemId], visible: true }
+      }));
+      return;
+    }
+
+    setLoadedReplies(prev => ({
+      ...prev,
+      [itemId]: { loading: true, visible: true, data: null, error: null }
+    }));
+
+    try {
+      let replies = [];
+      if (item.type === 'comment') {
+        replies = await fetchCommentReplies(item.link_id, item.id);
+      } else {
+        replies = await fetchPostComments(item.id);
+      }
+      setLoadedReplies(prev => ({
+        ...prev,
+        [itemId]: {
+          loading: false,
+          visible: true,
+          data: replies,
+          error: null
+        }
+      }));
+    } catch (err) {
+      setLoadedReplies(prev => ({
+        ...prev,
+        [itemId]: {
+          loading: false,
+          visible: true,
+          data: null,
+          error: err.message || 'Failed to load replies'
+        }
+      }));
+    }
+  };
+
+  const handleCloseLoadedReplies = (itemId, e) => {
+    if (e) e.stopPropagation();
+    setLoadedReplies(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], visible: false }
+    }));
   };
 
   // Process data for charts
@@ -315,13 +706,96 @@ function App() {
                 {loading ? 'Scanning...' : 'Snoop Profile'}
               </button>
             </div>
+
+            {/* Scan Target Toggle Buttons (Requirement 1) */}
+            <div className="search-toggles-wrapper">
+              <span className="search-toggles-title">Scan Scope:</span>
+              <div className="search-toggles-group">
+                <button
+                  type="button"
+                  className={`search-toggle-btn posts-toggle ${includePosts ? 'active' : ''}`}
+                  onClick={() => {
+                    if (includePosts && !includeComments) {
+                      setError('At least one of Posts or Comments must be selected.');
+                      return;
+                    }
+                    setError(null);
+                    setIncludePosts(!includePosts);
+                  }}
+                  title={includePosts && !includeComments ? 'At least one target must remain active' : 'Toggle Posts scan'}
+                >
+                  <span className="toggle-indicator">{includePosts ? '✓' : '○'}</span>
+                  <span className="toggle-label">📝 Posts</span>
+                  <span className="toggle-pill-status">{includePosts ? 'Active' : 'Off'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`search-toggle-btn comments-toggle ${includeComments ? 'active' : ''}`}
+                  onClick={() => {
+                    if (includeComments && !includePosts) {
+                      setError('At least one of Posts or Comments must be selected.');
+                      return;
+                    }
+                    setError(null);
+                    setIncludeComments(!includeComments);
+                  }}
+                  title={includeComments && !includePosts ? 'At least one target must remain active' : 'Toggle Comments scan'}
+                >
+                  <span className="toggle-indicator">{includeComments ? '✓' : '○'}</span>
+                  <span className="toggle-label">💬 Comments</span>
+                  <span className="toggle-pill-status">{includeComments ? 'Active' : 'Off'}</span>
+                </button>
+              </div>
+            </div>
           </form>
 
           {loading && (
             <div className="loader-wrapper">
               <div className="loader"></div>
               <p className="loader-text">{loadingProgress}</p>
-              <p className="loader-subtext">Compiling recent posting records (takes a few seconds)...</p>
+              <p className="loader-subtext">Streaming records through sliding window indexer...</p>
+
+              {/* Real-time Subreddit Discovery Radar (Requirement 4) */}
+              <div className="realtime-radar-panel glass-panel">
+                <div className="radar-header">
+                  <div className="radar-ping-dot">
+                    <span className="ping-beacon"></span>
+                    <span className="ping-core"></span>
+                  </div>
+                  <div className="radar-info">
+                    <h4 className="radar-title">Real-Time Subreddit Radar</h4>
+                    <span className="radar-count">
+                      {realtimeSubreddits.length} communit{realtimeSubreddits.length === 1 ? 'y' : 'ies'} detected in real time
+                    </span>
+                  </div>
+                  <div className="radar-counts-pills">
+                    {includePosts && <span className="radar-pill pill-posts">📝 {realtimeCounts.posts} posts</span>}
+                    {includeComments && <span className="radar-pill pill-comments">💬 {realtimeCounts.comments} comments</span>}
+                  </div>
+                </div>
+
+                {realtimeSubreddits.length > 0 ? (
+                  <div className="realtime-radar-chips">
+                    {realtimeSubreddits.map((sub, idx) => (
+                      <span 
+                        key={sub.subreddit} 
+                        className="realtime-radar-chip"
+                        style={{ animationDelay: `${Math.min(idx * 20, 200)}ms` }}
+                      >
+                        <span className="radar-chip-prefix">r/</span>
+                        <strong className="radar-chip-name">{sub.subreddit}</strong>
+                        <span className="radar-chip-count">{sub.count}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="radar-empty-scan">
+                    <span className="radar-scanner-line"></span>
+                    <span>Intercepting incoming subreddit mentions from Reddit API...</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -416,6 +890,134 @@ function App() {
 
           {/* Main Content Area */}
           <main className="main-content">
+            {/* Background Fetch & Rate Limit Banners (Requirements 1 & 3) */}
+            {bgFetchStatus.loading && (
+              <div className="glass-panel banner-notice banner-loading">
+                <div className="banner-content">
+                  <div className="loader-mini"></div>
+                  <div>
+                    <strong>Fetching {bgFetchStatus.type} in background...</strong>
+                    <p>Discovered {bgFetchStatus.count} items. Feel free to browse — records will merge automatically.</p>
+                  </div>
+                </div>
+                <div className="banner-progress-badge">
+                  ⚡ Live Streaming
+                </div>
+              </div>
+            )}
+
+            {bgFetchStatus.successMessage && (
+              <div className="glass-panel banner-notice banner-success">
+                <div className="banner-content">
+                  <span className="banner-icon">✅</span>
+                  <div>
+                    <strong>Data Integrated</strong>
+                    <p>{bgFetchStatus.successMessage}</p>
+                  </div>
+                </div>
+                <button 
+                  className="banner-close-btn" 
+                  onClick={() => setBgFetchStatus(prev => ({ ...prev, successMessage: null }))}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            {bgFetchStatus.error && (
+              <div className="glass-panel banner-notice banner-warning">
+                <div className="banner-content">
+                  <span className="banner-icon">⚠️</span>
+                  <div>
+                    <strong>Background fetch issue</strong>
+                    <p>{bgFetchStatus.error}</p>
+                  </div>
+                </div>
+                <button 
+                  className="bg-fetch-btn btn-retry"
+                  onClick={() => handleBackgroundFetch(bgFetchStatus.type || 'comments')}
+                >
+                  🔄 Retry Again
+                </button>
+              </div>
+            )}
+
+            {/* Rate-limited comments banner (Requirement 3) */}
+            {!bgFetchStatus.loading && stalkedUser.fetchFlags?.commentsError && (
+              <div className="glass-panel banner-notice banner-warning">
+                <div className="banner-content">
+                  <span className="banner-icon">⚠️</span>
+                  <div>
+                    <strong>Comments could not be fetched (Rate-limited / High volume)</strong>
+                    <p>The Reddit API rate-limited comments for u/{stalkedUser.username}. Posts and known interactions are shown below. You can retry fetching comments in the background.</p>
+                  </div>
+                </div>
+                <button 
+                  className="bg-fetch-btn btn-retry"
+                  onClick={() => handleBackgroundFetch('comments')}
+                >
+                  🔄 Retry Fetching Comments in Background
+                </button>
+              </div>
+            )}
+
+            {/* Comments toggled off banner (Requirement 1) */}
+            {!bgFetchStatus.loading && !stalkedUser.fetchFlags?.commentsEnabled && !stalkedUser.fetchFlags?.commentsFetched && !stalkedUser.fetchFlags?.commentsError && (
+              <div className="glass-panel banner-notice banner-info">
+                <div className="banner-content">
+                  <span className="banner-icon">💬</span>
+                  <div>
+                    <strong>Comments were excluded from initial scan</strong>
+                    <p>You searched with Comments toggled off. Would you like to fetch and analyze comments in the background?</p>
+                  </div>
+                </div>
+                <button 
+                  className="bg-fetch-btn btn-comments"
+                  onClick={() => handleBackgroundFetch('comments')}
+                >
+                  ⚡ Fetch Comments in Background
+                </button>
+              </div>
+            )}
+
+            {/* Rate-limited posts banner (Requirement 3) */}
+            {!bgFetchStatus.loading && stalkedUser.fetchFlags?.postsError && (
+              <div className="glass-panel banner-notice banner-warning">
+                <div className="banner-content">
+                  <span className="banner-icon">⚠️</span>
+                  <div>
+                    <strong>Posts could not be fetched (Rate-limited)</strong>
+                    <p>The Reddit API rate-limited post retrieval. Comments are shown below. You can retry fetching posts in the background.</p>
+                  </div>
+                </div>
+                <button 
+                  className="bg-fetch-btn btn-retry"
+                  onClick={() => handleBackgroundFetch('posts')}
+                >
+                  🔄 Retry Fetching Posts in Background
+                </button>
+              </div>
+            )}
+
+            {/* Posts toggled off banner (Requirement 1) */}
+            {!bgFetchStatus.loading && !stalkedUser.fetchFlags?.postsEnabled && !stalkedUser.fetchFlags?.postsFetched && !stalkedUser.fetchFlags?.postsError && (
+              <div className="glass-panel banner-notice banner-info">
+                <div className="banner-content">
+                  <span className="banner-icon">📝</span>
+                  <div>
+                    <strong>Posts were excluded from initial scan</strong>
+                    <p>You searched with Posts toggled off. Would you like to fetch submissions and images in the background?</p>
+                  </div>
+                </div>
+                <button 
+                  className="bg-fetch-btn btn-posts"
+                  onClick={() => handleBackgroundFetch('posts')}
+                >
+                  ⚡ Fetch Posts in Background
+                </button>
+              </div>
+            )}
+
             {/* 1. OVERVIEW & SCHEDULE */}
             {activeTab === 'overview' && (
               <div className="tab-pane">
@@ -556,7 +1158,39 @@ function App() {
                     >
                       Posts Only
                     </button>
+                    <button 
+                      className="feed-filter-btn expand-all-btn"
+                      onClick={toggleExpandAll}
+                      title="Toggle expand/collapse all feed cards"
+                    >
+                      ↕ Expand / Collapse All
+                    </button>
                   </div>
+
+                  {/* Real-time Participated Communities Bar in Feed (Requirement 4) */}
+                  {stalkedUser.subreddits.length > 0 && (
+                    <div className="feed-subreddit-quickcloud">
+                      <span className="quickcloud-title">Participated Communities ({stalkedUser.subreddits.length}):</span>
+                      <div className="quickcloud-scroll">
+                        <button 
+                          className={`quickcloud-chip ${!feedSubredditFilter ? 'active' : ''}`}
+                          onClick={() => setFeedSubredditFilter('')}
+                        >
+                          All
+                        </button>
+                        {stalkedUser.subreddits.slice(0, 20).map(s => (
+                          <button
+                            key={s.subreddit}
+                            className={`quickcloud-chip ${feedSubredditFilter.toLowerCase() === s.subreddit.toLowerCase() ? 'active' : ''}`}
+                            onClick={() => setFeedSubredditFilter(feedSubredditFilter.toLowerCase() === s.subreddit.toLowerCase() ? '' : s.subreddit)}
+                            title={`Filter feed to r/${s.subreddit}`}
+                          >
+                            r/{s.subreddit} <span className="quickcloud-badge">{s.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="feed-search-row">
                     <input 
@@ -600,39 +1234,228 @@ function App() {
                 <div className="feed-list">
                   {getFilteredFeed().length === 0 ? (
                     <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                      No posts or comments match the filters. Try typing a different search query.
+                      {feedFilter === 'comments' && (!stalkedUser.comments || stalkedUser.comments.length === 0) ? (
+                        <div>
+                          <p style={{ marginBottom: '1rem' }}>No comments currently indexed for u/{stalkedUser.username}.</p>
+                          {!stalkedUser.fetchFlags?.commentsFetched && (
+                            <button className="bg-fetch-btn btn-comments" onClick={() => handleBackgroundFetch('comments')}>
+                              ⚡ Fetch Comments in Background
+                            </button>
+                          )}
+                        </div>
+                      ) : feedFilter === 'posts' && (!stalkedUser.posts || stalkedUser.posts.length === 0) ? (
+                        <div>
+                          <p style={{ marginBottom: '1rem' }}>No posts currently indexed for u/{stalkedUser.username}.</p>
+                          {!stalkedUser.fetchFlags?.postsFetched && (
+                            <button className="bg-fetch-btn btn-posts" onClick={() => handleBackgroundFetch('posts')}>
+                              ⚡ Fetch Posts in Background
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        'No posts or comments match the filters. Try typing a different search query.'
+                      )}
                     </div>
                   ) : (
                     getFilteredFeed().map((item) => {
                       const isComment = item.type === 'comment';
-                      const text = isComment ? item.body : (item.selftext || '[Link Post]');
-                      const isTruncated = text.length > 280;
-                      const displayText = isTruncated ? text.substring(0, 280) + '...' : text;
+                      const text = isComment ? (item.body || '') : (item.selftext || '');
+                      const isLong = text.length > 280 || text.split('\n').length > 5;
+                      const isExpanded = !!expandedCards[item.id];
+                      const displayText = (!isExpanded && isLong) ? text.substring(0, 280) + '...' : text;
+
+                      const postId = isComment 
+                        ? (item.link_id ? item.link_id.replace(/^t3_/, '') : (item.parent_id?.startsWith('t3_') ? item.parent_id.replace(/^t3_/, '') : null))
+                        : item.id;
+                      const parentCommentId = isComment && item.parent_id && item.parent_id.startsWith('t1_') ? item.parent_id : null;
+
+                      const redditUrl = item.permalink
+                        ? (item.permalink.startsWith('http') ? item.permalink : `https://reddit.com${item.permalink}`)
+                        : (isComment && postId ? `https://reddit.com/comments/${postId}/_/${item.id}/` : `https://reddit.com/comments/${item.id}`);
+
+                      const archiveUrl = `https://arctic-shift.photon-reddit.com/search?id=${item.id}`;
                       
                       return (
                         <div 
                           key={item.id} 
                           className={`glass-panel feed-card ${isComment ? 'comment-type' : 'post-type'}`}
-                          onClick={() => isComment ? openCommentContext(item) : window.open(item.url || `https://reddit.com${item.permalink}`, '_blank')}
                         >
-                          <div className="feed-card-header">
-                            <div className="feed-card-meta">
-                              <span className="feed-card-type-tag">{item.type}</span>
-                              <span 
-                                className="feed-card-subreddit"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setFeedSubredditFilter(item.subreddit);
-                                }}
-                                title="Click to filter to this subreddit"
-                              >
-                                r/{item.subreddit}
-                              </span>
-                              <span>•</span>
-                              <span>{formatRelativeTime(item.created_utc)}</span>
+                          {/* Top Thread Navigation Buttons (User Request) */}
+                          {isComment && (postId || parentCommentId) && (
+                            <div className="card-top-actions">
+                              {postId && (
+                                <button 
+                                  type="button" 
+                                  className={`thread-action-btn ${loadedPosts[postId]?.visible ? 'active' : ''}`}
+                                  onClick={(e) => handleTogglePost(postId, e)}
+                                >
+                                  {loadedPosts[postId]?.loading 
+                                    ? '⏳ Loading post...' 
+                                    : loadedPosts[postId]?.visible 
+                                      ? '↑ Hide post' 
+                                      : '↑ Load post'}
+                                </button>
+                              )}
+                              {parentCommentId && (
+                                <button 
+                                  type="button" 
+                                  className={`thread-action-btn ${loadedParents[parentCommentId]?.visible ? 'active' : ''}`}
+                                  onClick={(e) => handleToggleParent(parentCommentId, e)}
+                                >
+                                  {loadedParents[parentCommentId]?.loading 
+                                    ? '⏳ Loading parent...' 
+                                    : loadedParents[parentCommentId]?.visible 
+                                      ? '↑ Hide parent comment' 
+                                      : '↑ Load parent comment'}
+                                </button>
+                              )}
                             </div>
-                            <span className={`feed-card-score ${item.score >= 0 ? 'score-pos' : 'score-neg'}`}>
-                              {item.score >= 0 ? `+${item.score}` : item.score}
+                          )}
+
+                          {/* Inline Loaded Post Box */}
+                          {postId && loadedPosts[postId]?.visible && (
+                            <div className="inline-loaded-box post-box" onClick={(e) => e.stopPropagation()}>
+                              <div className="inline-box-header">
+                                <span className="inline-box-badge badge-post">Original Post</span>
+                                <span className="inline-box-title">
+                                  {loadedPosts[postId].loading ? 'Loading submission...' : (loadedPosts[postId].data?.title || 'Submission')}
+                                </span>
+                                <button 
+                                  type="button" 
+                                  className="inline-box-close-btn"
+                                  onClick={(e) => handleCloseLoadedPost(postId, e)}
+                                  title="Close post"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                              {loadedPosts[postId].loading && (
+                                <div className="inline-box-loading">
+                                  <span className="mini-spinner"></span> Loading post {postId} from Arctic Shift...
+                                </div>
+                              )}
+                              {loadedPosts[postId].error && (
+                                <div className="inline-box-error">{loadedPosts[postId].error}</div>
+                              )}
+                              {loadedPosts[postId].data && (
+                                <div className="inline-box-content">
+                                  <div className="inline-box-meta">
+                                    <span className="feed-card-sub-name">r/{loadedPosts[postId].data.subreddit}</span>
+                                    <span className="feed-card-by-author"> by u/{loadedPosts[postId].data.author || '[deleted]'}</span>
+                                    <span className="feed-card-timestamp"> at {formatDateTimeIso(loadedPosts[postId].data.created_utc)}</span>
+                                    <span className="feed-card-separator"> | </span>
+                                    <span className="feed-card-score-pill">{loadedPosts[postId].data.score ?? 0} ↑</span>
+                                  </div>
+                                  {loadedPosts[postId].data.selftext && (
+                                    <div className="inline-box-body">
+                                      {loadedPosts[postId].data.selftext}
+                                    </div>
+                                  )}
+                                  <div className="inline-box-links">
+                                    <a 
+                                      href={loadedPosts[postId].data.permalink ? (loadedPosts[postId].data.permalink.startsWith('http') ? loadedPosts[postId].data.permalink : `https://reddit.com${loadedPosts[postId].data.permalink}`) : `https://reddit.com/comments/${loadedPosts[postId].data.id}`}
+                                      target="_blank" 
+                                      rel="noreferrer"
+                                      className="inline-link reddit-link"
+                                    >
+                                      🔗 Reddit
+                                    </a>
+                                    <a 
+                                      href={`https://arctic-shift.photon-reddit.com/search?id=${loadedPosts[postId].data.id}`}
+                                      target="_blank" 
+                                      rel="noreferrer"
+                                      className="inline-link archive-link"
+                                    >
+                                      🔗 Archive
+                                    </a>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Inline Loaded Parent Comment Box */}
+                          {parentCommentId && loadedParents[parentCommentId]?.visible && (
+                            <div className="inline-loaded-box parent-box" onClick={(e) => e.stopPropagation()}>
+                              <div className="inline-box-header">
+                                <span className="inline-box-badge badge-parent">Parent Comment</span>
+                                <span className="inline-box-title">
+                                  {loadedParents[parentCommentId].loading ? 'Loading parent...' : `u/${loadedParents[parentCommentId].data?.author || 'unknown'}`}
+                                </span>
+                                <button 
+                                  type="button" 
+                                  className="inline-box-close-btn"
+                                  onClick={(e) => handleCloseLoadedParent(parentCommentId, e)}
+                                  title="Close parent comment"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                              {loadedParents[parentCommentId].loading && (
+                                <div className="inline-box-loading">
+                                  <span className="mini-spinner"></span> Loading parent comment from Arctic Shift...
+                                </div>
+                              )}
+                              {loadedParents[parentCommentId].error && (
+                                <div className="inline-box-error">{loadedParents[parentCommentId].error}</div>
+                              )}
+                              {loadedParents[parentCommentId].data && (
+                                <div className="inline-box-content">
+                                  <div className="inline-box-meta">
+                                    <span className="feed-card-sub-name">r/{loadedParents[parentCommentId].data.subreddit || item.subreddit}</span>
+                                    <span className="feed-card-by-author"> by u/{loadedParents[parentCommentId].data.author || '[deleted]'}</span>
+                                    <span className="feed-card-timestamp"> at {formatDateTimeIso(loadedParents[parentCommentId].data.created_utc)}</span>
+                                    <span className="feed-card-separator"> | </span>
+                                    <span className="feed-card-score-pill">{loadedParents[parentCommentId].data.score ?? 0} ↑</span>
+                                  </div>
+                                  <div className="inline-box-body">
+                                    {loadedParents[parentCommentId].data.body || '[deleted]'}
+                                  </div>
+                                  <div className="inline-box-links">
+                                    <a 
+                                      href={loadedParents[parentCommentId].data.permalink ? (loadedParents[parentCommentId].data.permalink.startsWith('http') ? loadedParents[parentCommentId].data.permalink : `https://reddit.com${loadedParents[parentCommentId].data.permalink}`) : `https://reddit.com/_/${loadedParents[parentCommentId].data.id}`}
+                                      target="_blank" 
+                                      rel="noreferrer"
+                                      className="inline-link reddit-link"
+                                    >
+                                      🔗 Reddit
+                                    </a>
+                                    <a 
+                                      href={`https://arctic-shift.photon-reddit.com/search?id=${loadedParents[parentCommentId].data.id}`}
+                                      target="_blank" 
+                                      rel="noreferrer"
+                                      className="inline-link archive-link"
+                                    >
+                                      🔗 Archive
+                                    </a>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Feed Card Header (Formatted exactly like the screenshot) */}
+                          <div className="feed-card-header-styled">
+                            <span 
+                              className="feed-card-sub-name"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFeedSubredditFilter(item.subreddit);
+                              }}
+                              title={`Filter to r/${item.subreddit}`}
+                            >
+                              r/{item.subreddit}
+                            </span>
+                            <span className="feed-card-by-author"> by u/{item.author || stalkedUser.username}</span>
+                            <span className="feed-card-timestamp" title={formatUnixTime(item.created_utc)}>
+                              {' '}at {formatDateTimeIso(item.created_utc)}
+                            </span>
+                            <span className="feed-card-separator"> | </span>
+                            <span className="feed-card-score-pill">
+                              {item.score ?? 0} ↑
+                            </span>
+                            <span className={`feed-card-type-tag ${isComment ? 'tag-comment' : 'tag-post'}`} style={{ marginLeft: 'auto' }}>
+                              {item.type}
                             </span>
                           </div>
 
@@ -657,18 +1480,115 @@ function App() {
                             </>
                           )}
                           
-                          <div className={`feed-card-body ${isTruncated ? 'truncated' : ''}`}>
-                            {displayText}
-                          </div>
+                          {/* Expandable card content */}
+                          {text && (
+                            <div className={`feed-card-body ${isLong && !isExpanded ? 'truncated' : ''} ${isExpanded ? 'expanded' : ''}`}>
+                              {displayText}
+                            </div>
+                          )}
 
-                          <div className="feed-card-footer">
-                            <span>ID: {item.id}</span>
-                            {isComment ? (
-                              <span className="feed-card-prompt">Inspect Conversation Context →</span>
-                            ) : (
-                              <span className="feed-card-prompt" style={{ color: 'var(--accent-cyan)' }}>Open Post Link ↗</span>
+                          {isLong && (
+                            <button 
+                              type="button" 
+                              className="feed-card-expand-btn"
+                              onClick={(e) => toggleExpandCard(item.id, e)}
+                              aria-expanded={isExpanded}
+                            >
+                              {isExpanded ? '▴ Show less' : '▾ Show full content'}
+                            </button>
+                          )}
+
+                          {/* External Links row (Reddit, Archive, plus context drawer trigger) */}
+                          <div className="feed-card-links-row">
+                            <a 
+                              href={redditUrl} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="inline-link reddit-link"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              🔗 Reddit
+                            </a>
+                            <a 
+                              href={archiveUrl} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="inline-link archive-link"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              🔗 Archive
+                            </a>
+                            {isComment && (
+                              <button 
+                                type="button"
+                                className="inline-link context-link-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openCommentContext(item);
+                                }}
+                                title="Open in side context drawer"
+                              >
+                                💬 Side Drawer
+                              </button>
                             )}
                           </div>
+
+                          {/* Bottom Action: Load replies / comments */}
+                          <div className="card-bottom-actions">
+                            <button 
+                              type="button" 
+                              className={`thread-action-btn ${loadedReplies[item.id]?.visible ? 'active' : ''}`}
+                              onClick={(e) => handleToggleReplies(item, e)}
+                            >
+                              {loadedReplies[item.id]?.loading 
+                                ? `⏳ Loading ${isComment ? 'replies' : 'comments'}...` 
+                                : loadedReplies[item.id]?.visible 
+                                  ? `↑ Hide ${isComment ? 'replies' : 'comments'}` 
+                                  : `↓ Load ${isComment ? 'replies' : 'comments'}`}
+                            </button>
+                          </div>
+
+                          {/* Dynamic Replies Tree */}
+                          {loadedReplies[item.id]?.visible && (
+                            <div className="inline-replies-container" onClick={(e) => e.stopPropagation()}>
+                              <div className="inline-replies-header">
+                                <span className="replies-header-title">
+                                  {isComment ? '💬 Comment Replies' : '💬 Post Comments'}
+                                </span>
+                                <button 
+                                  type="button" 
+                                  className="inline-box-close-btn"
+                                  onClick={(e) => handleCloseLoadedReplies(item.id, e)}
+                                  title="Close replies"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                              {loadedReplies[item.id].loading && (
+                                <div className="inline-box-loading">
+                                  <span className="mini-spinner"></span> Loading dynamic tree from Arctic Shift...
+                                </div>
+                              )}
+                              {loadedReplies[item.id].error && (
+                                <div className="inline-box-error">{loadedReplies[item.id].error}</div>
+                              )}
+                              {loadedReplies[item.id].data && loadedReplies[item.id].data.length === 0 && !loadedReplies[item.id].loading && (
+                                <div className="inline-no-replies">No replies found in archive.</div>
+                              )}
+                              {loadedReplies[item.id].data && loadedReplies[item.id].data.length > 0 && (
+                                <div className="nested-replies-list">
+                                  {loadedReplies[item.id].data.map(reply => (
+                                    <CommentReplyTree 
+                                      key={reply.id} 
+                                      reply={reply} 
+                                      depth={0} 
+                                      formatDateTimeIso={formatDateTimeIso} 
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })
