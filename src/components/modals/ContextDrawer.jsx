@@ -1,4 +1,4 @@
-import { formatUnixTime } from '../../utils/formatters';
+import { formatUnixTime, formatFullDateTime } from '../../utils/formatters';
 
 export default function ContextDrawer({
   selectedComment,
@@ -101,7 +101,7 @@ export default function ContextDrawer({
                   justifyContent: 'space-between',
                 }}
               >
-                <span>{formatUnixTime(selectedComment.created_utc)}</span>
+                <span title={formatFullDateTime(selectedComment.created_utc)}>{formatUnixTime(selectedComment.created_utc)}</span>
                 <span>Subreddit: r/{selectedComment.subreddit}</span>
               </div>
             </div>

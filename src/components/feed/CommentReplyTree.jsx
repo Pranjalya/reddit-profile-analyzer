@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { formatDateTimeIso } from '../../utils/formatters';
+import { formatLocalDateTime, formatFullDateTime } from '../../utils/formatters';
 
 export default function CommentReplyTree({ reply, depth = 0 }) {
   const [subRepliesVisible, setSubRepliesVisible] = useState(false);
@@ -19,8 +19,8 @@ export default function CommentReplyTree({ reply, depth = 0 }) {
           <span className="nested-reply-flair">🏷️ {reply.author_flair_text}</span>
         )}
         <span>•</span>
-        <span className="nested-reply-time" title={formatDateTimeIso(reply.created_utc)}>
-          {reply.created_utc ? new Date(reply.created_utc * 1000).toISOString().replace('.000', '') : ''}
+        <span className="nested-reply-time" title={formatFullDateTime(reply.created_utc)}>
+          {formatLocalDateTime(reply.created_utc)}
         </span>
         <span className="nested-reply-score">{reply.score ?? 0} ↑</span>
       </div>

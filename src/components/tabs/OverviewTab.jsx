@@ -1,4 +1,4 @@
-import { formatUnixTime } from '../../utils/formatters';
+import { formatUnixTime, formatFullDateTime } from '../../utils/formatters';
 import { calculateHeatmapData } from '../../api/analytics';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -52,7 +52,7 @@ export default function OverviewTab({
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Earliest Indexed Activity
               </span>
-              <p style={{ fontWeight: '600', marginTop: '0.25rem' }}>
+              <p style={{ fontWeight: '600', marginTop: '0.25rem' }} title={formatFullDateTime(stats.earliestActive)}>
                 {formatUnixTime(stats.earliestActive)}
               </p>
             </div>
@@ -60,7 +60,7 @@ export default function OverviewTab({
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Latest Indexed Activity
               </span>
-              <p style={{ fontWeight: '600', marginTop: '0.25rem' }}>
+              <p style={{ fontWeight: '600', marginTop: '0.25rem' }} title={formatFullDateTime(stats.latestActive)}>
                 {formatUnixTime(stats.latestActive)}
               </p>
             </div>

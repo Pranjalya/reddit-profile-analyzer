@@ -2,6 +2,30 @@
  * Utility functions for formatting dates, timestamps, and numbers.
  */
 
+export function formatLocalDateTime(timestamp) {
+  if (!timestamp) return '';
+  try {
+    return new Date(timestamp * 1000).toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  } catch (e) {
+    return '';
+  }
+}
+
+export function formatFullDateTime(timestamp) {
+  if (!timestamp) return '';
+  try {
+    return new Date(timestamp * 1000).toLocaleString(undefined, {
+      dateStyle: 'full',
+      timeStyle: 'medium',
+    });
+  } catch (e) {
+    return '';
+  }
+}
+
 export function formatDateTimeIso(timestamp) {
   if (!timestamp) return '';
   try {
@@ -13,10 +37,7 @@ export function formatDateTimeIso(timestamp) {
 
 export function formatUnixTime(timestamp) {
   if (!timestamp) return 'Never';
-  return new Date(timestamp * 1000).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  });
+  return formatLocalDateTime(timestamp);
 }
 
 export function formatRelativeTime(timestamp) {

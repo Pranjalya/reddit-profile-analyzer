@@ -1,4 +1,4 @@
-import { formatDateTimeIso, formatUnixTime } from '../../utils/formatters';
+import { formatLocalDateTime, formatFullDateTime, formatUnixTime } from '../../utils/formatters';
 import { getPostImageUrl } from '../../utils/media';
 import CommentReplyTree from './CommentReplyTree';
 
@@ -97,7 +97,7 @@ export default function FeedCard({
               <div className="inline-box-meta">
                 <span className="feed-card-sub-name">r/{loadedPosts[postId].data.subreddit}</span>
                 <span className="feed-card-by-author"> by u/{loadedPosts[postId].data.author || '[deleted]'}</span>
-                <span className="feed-card-timestamp"> at {formatDateTimeIso(loadedPosts[postId].data.created_utc)}</span>
+                <span className="feed-card-timestamp" title={formatFullDateTime(loadedPosts[postId].data.created_utc)}> at {formatLocalDateTime(loadedPosts[postId].data.created_utc)}</span>
                 <span className="feed-card-separator"> | </span>
                 <span className="feed-card-score-pill">{loadedPosts[postId].data.score ?? 0} ↑</span>
               </div>
@@ -151,7 +151,7 @@ export default function FeedCard({
               <div className="inline-box-meta">
                 <span className="feed-card-sub-name">r/{loadedParents[parentCommentId].data.subreddit || item.subreddit}</span>
                 <span className="feed-card-by-author"> by u/{loadedParents[parentCommentId].data.author || '[deleted]'}</span>
-                <span className="feed-card-timestamp"> at {formatDateTimeIso(loadedParents[parentCommentId].data.created_utc)}</span>
+                <span className="feed-card-timestamp" title={formatFullDateTime(loadedParents[parentCommentId].data.created_utc)}> at {formatLocalDateTime(loadedParents[parentCommentId].data.created_utc)}</span>
                 <span className="feed-card-separator"> | </span>
                 <span className="feed-card-score-pill">{loadedParents[parentCommentId].data.score ?? 0} ↑</span>
               </div>
@@ -186,8 +186,8 @@ export default function FeedCard({
           r/{item.subreddit}
         </span>
         <span className="feed-card-by-author"> by u/{item.author || stalkedUsername}</span>
-        <span className="feed-card-timestamp" title={formatUnixTime(item.created_utc)}>
-          {' '}at {formatDateTimeIso(item.created_utc)}
+        <span className="feed-card-timestamp" title={formatFullDateTime(item.created_utc)}>
+          {' '}at {formatLocalDateTime(item.created_utc)}
         </span>
         <span className="feed-card-separator"> | </span>
         <span className="feed-card-score-pill">
